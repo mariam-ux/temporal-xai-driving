@@ -28,47 +28,53 @@ def load_data(args):
 
 def build_model(args):
     """
-    Modified NVIDIA model
+    Updated NVIDIA model (Keras 3 compatible)
     """
     model = Sequential()
-    model.add(Lambda(lambda x: x/127.5-1.0, input_shape=INPUT_SHAPE))
-    model.add(Conv2D(24, 5, 5, activation='elu', subsample=(2, 2)))
-    model.add(Conv2D(36, 5, 5, activation='elu', subsample=(2, 2)))
-    model.add(Conv2D(48, 5, 5, activation='elu', subsample=(2, 2)))
-    model.add(Conv2D(64, 3, 3, activation='elu'))
-    model.add(Conv2D(64, 3, 3, activation='elu'))
+    
+    model.add(Lambda(lambda x: x / 127.5 - 1.0, input_shape=INPUT_SHAPE))
+
+    model.add(Conv2D(24, (5, 5), activation='elu', strides=(2, 2)))
+    model.add(Conv2D(36, (5, 5), activation='elu', strides=(2, 2)))
+    model.add(Conv2D(48, (5, 5), activation='elu', strides=(2, 2)))
+    model.add(Conv2D(64, (3, 3), activation='elu'))
+    model.add(Conv2D(64, (3, 3), activation='elu'))
+
     model.add(Dropout(args.keep_prob))
     model.add(Flatten())
+
     model.add(Dense(100, activation='elu'))
     model.add(Dense(50, activation='elu'))
     model.add(Dense(10, activation='elu'))
     model.add(Dense(1))
-    model.summary()
 
+    model.summary()
     return model
 
 
 def train_model(model, args, X_train, X_valid, y_train, y_valid):
-    """
-    Train the model
-    """
-    checkpoint = ModelCheckpoint('model-{epoch:03d}.h5',
-                                 monitor='val_loss',
-                                 verbose=0,
-                                 save_best_only=args.save_best_only,
-                                 mode='auto')
+    checkpoint = ModelCheckpoint(
+        'model-{epoch:03d}.h5',
+        monitor='val_loss',
+        save_best_only=args.save_best_only,
+        mode='min',
+        verbose=1
+    )
 
-    model.compile(loss='mean_squared_error', optimizer=Adam(lr=args.learning_rate))
+    model.compile(
+        loss='mse',
+        optimizer=Adam(learning_rate=args.learning_rate)
+    )
 
-    model.fit_generator(batch_generator(args.data_dir, X_train, y_train, args.batch_size, True),
-                        args.samples_per_epoch,
-                        args.nb_epoch,
-                        max_q_size=1,
-                        validation_data=batch_generator(args.data_dir, X_valid, y_valid, args.batch_size, False),
-                        nb_val_samples=len(X_valid),
-                        callbacks=[checkpoint],
-                        verbose=1)
-
+    model.fit(
+        batch_generator(args.data_dir, X_train, y_train, args.batch_size, True),
+        steps_per_epoch=args.samples_per_epoch // args.batch_size,
+        epochs=args.nb_epoch,
+        validation_data=batch_generator(args.data_dir, X_valid, y_valid, args.batch_size, False),
+        validation_steps=len(X_valid) // args.batch_size,
+        callbacks=[checkpoint],
+        verbose=1
+    )
 
 def s2b(s):
     """
