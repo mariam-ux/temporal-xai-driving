@@ -70,8 +70,8 @@ def telemetry(sid, data):
 
         steering_angle = float(model.predict(image_array, verbose=0))
 
-        throttle = controller.update(float(speed))
-
+        throttle = max(0.1, controller.update(float(speed)))
+        print("PRED:", steering_angle)
         print(steering_angle, throttle)
         send_control(steering_angle, throttle)
 
@@ -93,12 +93,12 @@ def connect(sid, environ):
 
 def send_control(steering_angle, throttle):
     sio.emit(
-        "steer",
-        data={
-            'steering_angle': steering_angle.__str__(),
-            'throttle': throttle.__str__()
-        },
-        skip_sid=True)
+    "steer",
+    data={
+        'steering_angle': float(steering_angle),
+        'throttle': float(throttle)
+    },
+    skip_sid=True)
 
 
 if __name__ == '__main__':
@@ -126,7 +126,7 @@ if __name__ == '__main__':
         print('You are using Keras version ', keras_version,
               ', but the model was built using ', model_version)
 
-    model = load_model(args.model)
+    model = load_model(args.model, compile=False)
 
     if args.image_folder != '':
         print("Creating image folder at {}".format(args.image_folder))

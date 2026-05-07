@@ -85,27 +85,24 @@ def random_shadow(image):
     """
     Generates and adds random shadow
     """
-    # (x1, y1) and (x2, y2) forms a line
-    # xm, ym gives all the locations of the image
-    x1, y1 = IMAGE_WIDTH * np.random.rand(), 0
-    x2, y2 = IMAGE_WIDTH * np.random.rand(), IMAGE_HEIGHT
-    xm, ym = np.mgrid[0:IMAGE_HEIGHT, 0:IMAGE_WIDTH]
+    h, w = image.shape[:2]
 
-    # mathematically speaking, we want to set 1 below the line and zero otherwise
-    # Our coordinate is up side down.  So, the above the line: 
-    # (ym-y1)/(xm-x1) > (y2-y1)/(x2-x1)
-    # as x2 == x1 causes zero-division problem, we'll write it in the below form:
-    # (ym-y1)*(x2-x1) - (y2-y1)*(xm-x1) > 0
+    x1, y1 = w * np.random.rand(), 0
+    x2, y2 = w * np.random.rand(), h
+
+    xm, ym = np.mgrid[0:h, 0:w]
+
     mask = np.zeros_like(image[:, :, 1])
-    mask[(ym - y1) * (x2 - x1) - (y2 - y1) * (xm - x1) > 0] = 1
 
-    # choose which side should have shadow and adjust saturation
+    mask[((ym - y1) * (x2 - x1) - (y2 - y1) * (xm - x1)) > 0] = 1
+
     cond = mask == np.random.randint(2)
+
     s_ratio = np.random.uniform(low=0.2, high=0.5)
 
-    # adjust Saturation in HLS(Hue, Light, Saturation)
     hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
     hls[:, :, 1][cond] = hls[:, :, 1][cond] * s_ratio
+
     return cv2.cvtColor(hls, cv2.COLOR_HLS2RGB)
 
 

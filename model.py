@@ -8,6 +8,7 @@ from keras.layers import Lambda, Conv2D, MaxPooling2D, Dropout, Dense, Flatten
 from utils import INPUT_SHAPE, batch_generator
 import argparse
 import os
+from keras.losses import MeanSquaredError
 
 np.random.seed(0)
 
@@ -16,7 +17,7 @@ def load_data(args):
     """
     Load training data and split it into training and validation set
     """
-    data_df = pd.read_csv(os.path.join(args.data_dir, 'driving_log.csv'))
+    data_df = pd.read_csv('data/driving_log.csv', names=['center', 'left', 'right', 'steering', 'throttle', 'brake', 'speed'])
 
     X = data_df[['center', 'left', 'right']].values
     y = data_df['steering'].values
@@ -54,7 +55,7 @@ def build_model(args):
 
 def train_model(model, args, X_train, X_valid, y_train, y_valid):
     checkpoint = ModelCheckpoint(
-        'model-{epoch:03d}.h5',
+        'model-{epoch:03d}.keras',
         monitor='val_loss',
         save_best_only=args.save_best_only,
         mode='min',
@@ -62,7 +63,7 @@ def train_model(model, args, X_train, X_valid, y_train, y_valid):
     )
 
     model.compile(
-        loss='mse',
+        loss=MeanSquaredError(),
         optimizer=Adam(learning_rate=args.learning_rate)
     )
 
