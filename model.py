@@ -9,6 +9,7 @@ from utils import INPUT_SHAPE, batch_generator
 import argparse
 import os
 from keras.losses import MeanSquaredError
+from keras.layers import Rescaling
 
 np.random.seed(0)
 
@@ -33,7 +34,10 @@ def build_model(args):
     """
     model = Sequential()
     
-    model.add(Lambda(lambda x: x / 127.5 - 1.0, input_shape=INPUT_SHAPE))
+    
+    from keras.layers import Rescaling
+
+    model.add(Rescaling(1./127.5, offset=-1, input_shape=INPUT_SHAPE))
 
     model.add(Conv2D(24, (5, 5), activation='elu', strides=(2, 2)))
     model.add(Conv2D(36, (5, 5), activation='elu', strides=(2, 2)))

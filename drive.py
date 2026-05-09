@@ -18,7 +18,7 @@ from keras import __version__ as keras_version
 
 from utils import preprocess
 
-sio = socketio.Server()
+sio = socketio.Server(cors_allowed_origins='*')
 app = Flask(__name__)
 model = None
 prev_image_array = None
@@ -52,6 +52,7 @@ controller.set_desired(set_speed)
 
 @sio.on('telemetry')
 def telemetry(sid, data):
+    print("🔥 TELEMETRY RECEIVED")
     if data:
         # The current steering angle of the car
         steering_angle = data["steering_angle"]
@@ -68,11 +69,15 @@ def telemetry(sid, data):
         # Apply same preprocessing as training
         image_array = image_array[None, :, :, :]
 
-        steering_angle = float(model.predict(image_array, verbose=0))
+        steering_angle = float(model.predict(image_array, verbose=0)[0][0])
 
-        throttle = max(0.1, controller.update(float(speed)))
+        if float(speed) < 5:
+            throttle = 0.3
+        else:
+            throttle = controller.update(float(speed))
         print("PRED:", steering_angle)
-        print(steering_angle, throttle)
+        print("SPEED:", speed)
+        print("THROTTLE:", throttle)
         send_control(steering_angle, throttle)
 
         # save frame
@@ -85,20 +90,21 @@ def telemetry(sid, data):
         sio.emit('manual', data={}, skip_sid=True)
 
 
+
 @sio.on('connect')
 def connect(sid, environ):
-    print("connect ", sid)
+    print("CLIENT CONNECTED:", sid)
     send_control(0, 0)
-
 
 def send_control(steering_angle, throttle):
     sio.emit(
-    "steer",
-    data={
-        'steering_angle': float(steering_angle),
-        'throttle': float(throttle)
-    },
-    skip_sid=True)
+        "steer",
+        data={
+            'steering_angle': str(steering_angle),
+            'throttle': str(throttle)
+        },
+        skip_sid=True
+    )
 
 
 if __name__ == '__main__':
@@ -118,15 +124,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # check that model Keras version is same as local Keras version
-    f = h5py.File(args.model, mode='r')
-    model_version = f.attrs.get('keras_version')
-    keras_version = str(keras_version).encode('utf8')
-
-    if model_version != keras_version:
-        print('You are using Keras version ', keras_version,
-              ', but the model was built using ', model_version)
-
     model = load_model(args.model, compile=False)
+    print("Model loaded successfully")
 
     if args.image_folder != '':
         print("Creating image folder at {}".format(args.image_folder))
@@ -140,7 +139,7 @@ if __name__ == '__main__':
         print("NOT RECORDING THIS RUN ...")
 
     # wrap Flask application with engineio's middleware
-    app = socketio.Middleware(sio, app)
+    app = socketio.WSGIApp(sio, app)
 
     # deploy as an eventlet WSGI server
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
