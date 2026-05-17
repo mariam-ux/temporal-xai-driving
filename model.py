@@ -4,12 +4,13 @@ from sklearn.model_selection import train_test_split
 from keras.models import Sequential, Model
 from keras.optimizers import Adam
 from keras.callbacks import ModelCheckpoint
-from keras.layers import  Conv2D, Dropout, Dense, Flatten, Input, TimeDistributed, LSTM, Rescaling
+from keras.layers import  Conv2D, Dropout, Dense, Flatten, Input, TimeDistributed, LSTM, Rescaling,Multiply, Reshape,Softmax, Lambda
 from utils import INPUT_SHAPE, batch_generator
 import argparse
 import os
 from keras.losses import MeanSquaredError
 from keras.regularizers import l2
+from keras.layers import GlobalAveragePooling1D
 
 np.random.seed(0)
 
@@ -116,10 +117,36 @@ def build_model(args):
 
     x = LSTM(
     64,
-    return_sequences=False,
+    return_sequences=True,
     dropout=0.2,
-    kernel_regularizer=l2(1e-4)
+    kernel_regularizer=l2(1e-4),
+    name="temporal_lstm"
     )(x)
+
+    # ---------------------------------
+    # TEMPORAL ATTENTION
+    # ---------------------------------
+
+    attention_scores = Dense(1, activation='tanh')(x)
+
+    attention_scores = Flatten()(attention_scores)
+
+    attention_weights = Softmax(name="temporal_attention")(attention_scores)
+
+    # reshape for broadcasting
+    attention_weights = Reshape((SEQ_LEN, 1))(attention_weights)
+
+    print("Attention shape:", attention_weights.shape)
+
+    # apply attention weights
+    x = Multiply()([x, attention_weights])
+
+    # temporal context vector
+    x = GlobalAveragePooling1D()(x)
+
+    # ---------------------------------
+    # FC HEAD
+    # ---------------------------------
 
     x = Dropout(args.keep_prob)(x)
 
@@ -186,7 +213,7 @@ def main():
     parser.add_argument('-d', help='data directory',        dest='data_dir',          type=str,   default='data')
     parser.add_argument('-t', help='test size fraction',    dest='test_size',         type=float, default=0.2)
     parser.add_argument('-k', help='drop out probability',  dest='keep_prob',         type=float, default=0.3)
-    parser.add_argument('-n', help='number of epochs',      dest='nb_epoch',          type=int,   default=20)
+    parser.add_argument('-n', help='number of epochs',      dest='nb_epoch',          type=int,   default=15)
     parser.add_argument('-s', help='samples per epoch',     dest='samples_per_epoch', type=int,   default=6000)
     parser.add_argument('-b', help='batch size',            dest='batch_size',        type=int,   default=24)
     parser.add_argument('-o', help='save best models only', dest='save_best_only',    type=s2b,   default='true')

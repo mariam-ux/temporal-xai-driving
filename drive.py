@@ -11,8 +11,8 @@ import eventlet.wsgi
 from PIL import Image
 from flask import Flask
 from io import BytesIO
-
-from keras.models import load_model
+import tensorflow as tf
+from keras.models import load_model, Model
 import h5py
 from keras import __version__ as keras_version
 
@@ -26,7 +26,7 @@ sio = socketio.Server(cors_allowed_origins='*')
 app = Flask(__name__)
 model = None
 prev_image_array = None
-
+attention_model = None
 
 class SimplePIController:
     def __init__(self, Kp, Ki):
@@ -59,6 +59,7 @@ prev_steering = 0.0  # global smoothing memory
 @sio.on('telemetry')
 def telemetry(sid, data):
     global prev_steering
+    global attention_model
 
     print("🔥 TELEMETRY RECEIVED")
 
@@ -132,6 +133,9 @@ def telemetry(sid, data):
         print("SPEED:", speed)
         print("THROTTLE:", throttle)
 
+        attention = attention_model.predict(model_input, verbose=0)[0]
+
+        print("TEMPORAL WEIGHTS:", attention)
         # -------------------------
         # SEND CONTROL
         # -------------------------
@@ -174,7 +178,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # check that model Keras version is same as local Keras version
-    model = load_model(args.model, compile=False)
+    model = load_model(
+    args.model,
+    compile=False,
+    safe_mode=False
+    )
+
+    attention_model = Model(
+    inputs=model.input,
+    outputs=model.get_layer("temporal_attention").output
+    )
+
     print("Model loaded successfully")
     print(model.input_shape)
 
