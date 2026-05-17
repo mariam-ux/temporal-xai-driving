@@ -5,7 +5,7 @@ import matplotlib.image as mpimg
 
 IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS = 66, 200, 3
 INPUT_SHAPE = (IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS)
-
+SEQ_LEN = 5
 
 def load_image(data_dir, image_file):
     """
@@ -42,6 +42,10 @@ def preprocess(image):
     image = crop(image)
     image = resize(image)
     image = rgb2yuv(image)
+
+    # 🔥 normalize (VERY IMPORTANT for model stability)
+    image = (image / 127.5) - 1
+
     return image
 
 
@@ -52,9 +56,9 @@ def choose_image(data_dir, center, left, right, steering_angle):
     """
     choice = np.random.choice(3)
     if choice == 0:
-        return load_image(data_dir, left), steering_angle + 0.2
+        return load_image(data_dir, left), steering_angle + 0.4
     elif choice == 1:
-        return load_image(data_dir, right), steering_angle - 0.2
+        return load_image(data_dir, right), steering_angle - 0.4
     return load_image(data_dir, center), steering_angle
 
 
@@ -130,27 +134,59 @@ def augument(data_dir, center, left, right, steering_angle, range_x=100, range_y
     return image, steering_angle
 
 
-def batch_generator(data_dir, image_paths, steering_angles, batch_size, is_training):
+def batch_generator(data_dir, image_sequences, steering_angles, batch_size, is_training):
     """
-    Generate training image give image paths and associated steering angles
+    Generate batches of image sequences for temporal learning
     """
-    images = np.empty([batch_size, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])
+
+    images = np.empty([
+        batch_size,
+        SEQ_LEN,
+        IMAGE_HEIGHT,
+        IMAGE_WIDTH,
+        IMAGE_CHANNELS
+    ])
+
     steers = np.empty(batch_size)
+
     while True:
+
         i = 0
-        for index in np.random.permutation(image_paths.shape[0]):
-            center, left, right = image_paths[index]
+
+        for index in np.random.permutation(len(image_sequences)):
+
+            sequence_paths = image_sequences[index]
             steering_angle = steering_angles[index]
-            # argumentation
-            if is_training and np.random.rand() < 0.6:
-                image, steering_angle = augument(data_dir, center, left, right, steering_angle)
-            else:
-                image = load_image(data_dir, center) 
-            # add the image and steering angle to the batch
-            images[i] = preprocess(image)
+
+            sequence_images = []
+
+            augment_sequence = is_training and np.random.rand() < 0.3
+
+            for image_path in sequence_paths:
+
+                if augment_sequence:
+                    image, steering_angle = augument(
+                        data_dir,
+                        image_path,
+                        image_path,
+                        image_path,
+                        steering_angle
+                        )
+                else:
+                    image = load_image(data_dir, image_path)
+
+                image = preprocess(image)
+
+                sequence_images.append(image)
+
+            images[i] = np.array(sequence_images)
+
             steers[i] = steering_angle
+
             i += 1
+
             if i == batch_size:
                 break
+
         yield images, steers
 

@@ -1,61 +1,138 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from keras.models import Sequential
+from keras.models import Sequential, Model
 from keras.optimizers import Adam
 from keras.callbacks import ModelCheckpoint
-from keras.layers import Lambda, Conv2D, MaxPooling2D, Dropout, Dense, Flatten
+from keras.layers import  Conv2D, Dropout, Dense, Flatten, Input, TimeDistributed, LSTM, Rescaling
 from utils import INPUT_SHAPE, batch_generator
 import argparse
 import os
 from keras.losses import MeanSquaredError
-from keras.layers import Rescaling
+from keras.regularizers import l2
 
 np.random.seed(0)
 
+SEQ_LEN = 5
+
+def create_sequences(samples, seq_len=SEQ_LEN):
+    X_seq = []
+    y_seq = []
+
+    for i in range(len(samples) - seq_len):
+        sequence = samples[i:i + seq_len]
+
+        image_paths = [frame[0] for frame in sequence]
+
+        steering = float(sequence[-1][3])
+
+        X_seq.append(image_paths)
+        y_seq.append(steering)
+
+    return np.array(X_seq), np.array(y_seq)
 
 def load_data(args):
-    """
-    Load training data and split it into training and validation set
-    """
-    data_df = pd.read_csv('data/driving_log.csv', names=['center', 'left', 'right', 'steering', 'throttle', 'brake', 'speed'])
+    data_df = pd.read_csv(
+        'data/driving_log.csv',
+        names=[
+            'center',
+            'left',
+            'right',
+            'steering',
+            'throttle',
+            'brake',
+            'speed'
+        ]
+    )
 
-    X = data_df[['center', 'left', 'right']].values
-    y = data_df['steering'].values
+    samples = data_df.values
 
-    X_train, X_valid, y_train, y_valid = train_test_split(X, y, test_size=args.test_size, random_state=0)
+    filtered_samples = []
+
+    for sample in samples:
+
+        steering = float(sample[3])
+
+        if abs(steering) < 0.02:
+            if np.random.rand() < 0.40:
+                continue
+
+        elif abs(steering) < 0.08:
+            if np.random.rand() < 0.15:
+                continue
+
+    # Keep all meaningful turns/recoveries
+        filtered_samples.append(sample)
+
+    samples = np.array(filtered_samples)
+
+    print("Original samples:", len(data_df.values))
+    print("Filtered samples:", len(samples))
+    
+    X, y = create_sequences(samples)
+
+    print("Min steering:", np.min(y))
+    print("Max steering:", np.max(y))
+    print("Mean steering:", np.mean(y))
+
+    X_train, X_valid, y_train, y_valid = train_test_split(
+        X,
+        y,
+        test_size=args.test_size,
+        shuffle=False,
+        random_state=0
+    )
 
     return X_train, X_valid, y_train, y_valid
 
 
 def build_model(args):
-    """
-    Updated NVIDIA model (Keras 3 compatible)
-    """
-    model = Sequential()
-    
-    
-    from keras.layers import Rescaling
 
-    model.add(Rescaling(1./127.5, offset=-1, input_shape=INPUT_SHAPE))
+    seq_input = Input(shape=(SEQ_LEN, 66, 200, 3))
 
-    model.add(Conv2D(24, (5, 5), activation='elu', strides=(2, 2)))
-    model.add(Conv2D(36, (5, 5), activation='elu', strides=(2, 2)))
-    model.add(Conv2D(48, (5, 5), activation='elu', strides=(2, 2)))
-    model.add(Conv2D(64, (3, 3), activation='elu'))
-    model.add(Conv2D(64, (3, 3), activation='elu'))
+  
 
-    model.add(Dropout(args.keep_prob))
-    model.add(Flatten())
+    x = TimeDistributed(
+        Conv2D(24, (5,5), strides=(2,2), activation='elu')
+    )(seq_input)
 
-    model.add(Dense(100, activation='elu'))
-    model.add(Dense(50, activation='elu'))
-    model.add(Dense(10, activation='elu'))
-    model.add(Dense(1))
+    x = TimeDistributed(
+        Conv2D(36, (5,5), strides=(2,2), activation='elu')
+    )(x)
+
+    x = TimeDistributed(
+        Conv2D(48, (5,5), strides=(2,2), activation='elu')
+    )(x)
+
+    x = TimeDistributed(
+        Conv2D(64, (3,3), activation='elu')
+    )(x)
+
+    x = TimeDistributed(
+        Conv2D(64, (3,3), activation='elu')
+    )(x)
+
+    x = TimeDistributed(Flatten())(x)
+
+    x = LSTM(
+    64,
+    return_sequences=False,
+    dropout=0.2,
+    kernel_regularizer=l2(1e-4)
+    )(x)
+
+    x = Dropout(args.keep_prob)(x)
+
+    x = Dense(50, activation='elu')(x)
+    x = Dense(10, activation='elu')(x)
+
+    output = Dense(1)(x)
+
+    model = Model(inputs=seq_input, outputs=output)
 
     model.summary()
-    return model
 
+    return model
 
 def train_model(model, args, X_train, X_valid, y_train, y_valid):
     checkpoint = ModelCheckpoint(
@@ -71,6 +148,18 @@ def train_model(model, args, X_train, X_valid, y_train, y_valid):
         optimizer=Adam(learning_rate=args.learning_rate)
     )
 
+    X_test, y_test = next(
+        batch_generator(
+            args.data_dir,
+            X_train,
+            y_train,
+            args.batch_size,
+            True
+        )
+    )
+
+    print("TEMPORAL BATCH SHAPE:", X_test.shape)
+    
     model.fit(
         batch_generator(args.data_dir, X_train, y_train, args.batch_size, True),
         steps_per_epoch=args.samples_per_epoch // args.batch_size,
@@ -96,12 +185,12 @@ def main():
     parser = argparse.ArgumentParser(description='Behavioral Cloning Training Program')
     parser.add_argument('-d', help='data directory',        dest='data_dir',          type=str,   default='data')
     parser.add_argument('-t', help='test size fraction',    dest='test_size',         type=float, default=0.2)
-    parser.add_argument('-k', help='drop out probability',  dest='keep_prob',         type=float, default=0.5)
-    parser.add_argument('-n', help='number of epochs',      dest='nb_epoch',          type=int,   default=10)
-    parser.add_argument('-s', help='samples per epoch',     dest='samples_per_epoch', type=int,   default=20000)
-    parser.add_argument('-b', help='batch size',            dest='batch_size',        type=int,   default=40)
+    parser.add_argument('-k', help='drop out probability',  dest='keep_prob',         type=float, default=0.3)
+    parser.add_argument('-n', help='number of epochs',      dest='nb_epoch',          type=int,   default=20)
+    parser.add_argument('-s', help='samples per epoch',     dest='samples_per_epoch', type=int,   default=6000)
+    parser.add_argument('-b', help='batch size',            dest='batch_size',        type=int,   default=24)
     parser.add_argument('-o', help='save best models only', dest='save_best_only',    type=s2b,   default='true')
-    parser.add_argument('-l', help='learning rate',         dest='learning_rate',     type=float, default=1.0e-4)
+    parser.add_argument('-l', help='learning rate',         dest='learning_rate',     type=float, default=2e-5)
     args = parser.parse_args()
 
     print('-' * 30)
