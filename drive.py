@@ -135,7 +135,16 @@ def telemetry(sid, data):
 
         attention = attention_model.predict(model_input, verbose=0)[0]
 
-        print("TEMPORAL WEIGHTS:", attention)
+        # exponential decay used during training
+        decay = np.array([0.7 ** (4 - i) for i in range(5)])
+        decay = decay / np.sum(decay)
+
+        effective_attention = attention * decay
+        effective_attention = effective_attention / np.sum(effective_attention)
+
+        print("RAW ATTENTION:", attention)
+        print("DECAY:", decay)
+        print("EFFECTIVE TEMPORAL WEIGHTS:", effective_attention)
         # -------------------------
         # SEND CONTROL
         # -------------------------

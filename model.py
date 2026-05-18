@@ -11,10 +11,12 @@ import os
 from keras.losses import MeanSquaredError
 from keras.regularizers import l2
 from keras.layers import GlobalAveragePooling1D
+import tensorflow as tf
 
 np.random.seed(0)
 
 SEQ_LEN = 5
+DECAY_FACTOR = 0.7
 
 def create_sequences(samples, seq_len=SEQ_LEN):
     X_seq = []
@@ -127,10 +129,30 @@ def build_model(args):
     # TEMPORAL ATTENTION
     # ---------------------------------
 
+    # learned attention scores
     attention_scores = Dense(1, activation='tanh')(x)
 
     attention_scores = Flatten()(attention_scores)
 
+    # ---------------------------------
+    # EXPONENTIAL DECAY
+    # recent frames receive larger weight
+    # ---------------------------------
+
+    decay_values = np.array([
+        DECAY_FACTOR ** (SEQ_LEN - 1 - i)
+        for i in range(SEQ_LEN)
+    ], dtype=np.float32)
+
+    # normalize decay
+    decay_values = decay_values / np.sum(decay_values)
+
+    print("EXP DECAY:", decay_values)
+
+   # apply exponential decay directly
+    attention_scores = attention_scores * decay_values
+
+    # final normalized temporal attention
     attention_weights = Softmax(name="temporal_attention")(attention_scores)
 
     # reshape for broadcasting
@@ -141,9 +163,8 @@ def build_model(args):
     # apply attention weights
     x = Multiply()([x, attention_weights])
 
-    # temporal context vector
+    # weighted temporal aggregation
     x = GlobalAveragePooling1D()(x)
-
     # ---------------------------------
     # FC HEAD
     # ---------------------------------
