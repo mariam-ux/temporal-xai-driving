@@ -15,6 +15,8 @@ import tensorflow as tf
 from keras.models import load_model, Model
 import h5py
 from keras import __version__ as keras_version
+import cv2
+import matplotlib.pyplot as plt
 
 from utils import preprocess
 
@@ -55,6 +57,41 @@ controller.set_desired(set_speed)
 
 
 prev_steering = 0.0  # global smoothing memory
+
+def make_gradcam_heatmap(model_input):
+
+    with tf.GradientTape() as tape:
+
+        conv_outputs, predictions = grad_model(model_input)
+
+        loss = predictions[:, 0]
+
+    grads = tape.gradient(loss, conv_outputs)
+
+    # use latest frame only
+    conv_outputs = conv_outputs[0, -1]
+    grads = grads[0, -1]
+
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1))
+
+    conv_outputs = conv_outputs.numpy()
+    pooled_grads = pooled_grads.numpy()
+    print(conv_outputs.shape)
+    print(grads.shape)
+    
+    for i in range(pooled_grads.shape[-1]):
+        conv_outputs[:, :, i] *= pooled_grads[i]
+
+    heatmap = np.mean(conv_outputs, axis=-1)
+
+    heatmap = np.maximum(heatmap, 0)
+
+    heatmap /= np.max(heatmap) + 1e-8
+    heatmap = np.maximum(heatmap, 0)
+
+    
+
+    return heatmap
 
 @sio.on('telemetry')
 def telemetry(sid, data):
@@ -98,6 +135,18 @@ def telemetry(sid, data):
         # -------------------------
         print("BUFFER SIZE:", len(frame_buffer))
         pred = model.predict(model_input, verbose=0)[0][0]
+
+        #---- CREATING THE HEATMEP ------#
+        heatmap = make_gradcam_heatmap(model_input)
+        heatmap = cv2.resize(heatmap, (200, 66))
+        heatmap = np.uint8(255 * heatmap)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        original = ((image_array + 1) * 127.5).astype(np.uint8)
+        original = cv2.cvtColor(original, cv2.COLOR_RGB2BGR)
+        overlay = cv2.addWeighted(original, 0.6, heatmap, 0.4, 0)
+        cv2.imshow("GradCAM", overlay)
+        cv2.waitKey(1)
+        
 
         # 🔥 scale steering (VERY IMPORTANT)
         steering_angle = float(pred) * 0.8
@@ -193,9 +242,19 @@ if __name__ == '__main__':
     safe_mode=False
     )
 
+    # ------ ATTENTION MODEL ------ #
     attention_model = Model(
     inputs=model.input,
     outputs=model.get_layer("temporal_attention").output
+    )
+
+    # ------ GRAD-CAM MODEL ------#
+    grad_model = Model(
+    inputs=model.input,
+    outputs=[
+        model.get_layer("last_conv").output,
+        model.output
+    ]
     )
 
     print("Model loaded successfully")
@@ -217,3 +276,4 @@ if __name__ == '__main__':
 
     # deploy as an eventlet WSGI server
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
+
